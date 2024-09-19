@@ -1,0 +1,50 @@
+{
+    "num_Legendre_points": 24,
+    "AffineElementType": "Eigen::VectorXd",
+    "Process": {
+        "dim": 3,
+        "rate": 0.00,
+        "num_time_steps": 1e+4,
+        "num_mc_paths": 5e+3,
+        "Type": "SABR",
+        "Horizont": 1,
+        "beta": 0.5,
+        "Params": {
+            "init_vol": [ 1.8, 2.0, 13.6],
+            "init_asset": 100,
+            "vol_vol": 0.4
+        }
+    },
+    "Cases": [
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "RainbowCallOnMax",
+            "maturity": 1,
+            "strike": 100,
+            "Pi": "RainbowCallMaxBlack",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "RainbowCallOnMax",
+            "maturity": 5,
+            "strike": 100,
+            "Pi": "RainbowCallMaxBlack",
+            "fixing_times": []
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+    ]
+}      

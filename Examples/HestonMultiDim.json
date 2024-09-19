@@ -1,0 +1,99 @@
+{
+    "num_Legendre_points": 24,
+    "AffineElementType": "Eigen::VectorXd",
+    "Process": {
+        "dim": 3,
+        "rate": 0.05,
+        "num_time_steps": 1e+3,
+        "num_mc_paths": 5e+3,
+        "Type": "HestonMultDim",
+        "Horizont": 1,
+        "beta": 1,
+        "Params": {
+            "init_vol": [ 0.0049,  0.01,  0.0169 ],
+            "init_asset": 100,
+            "vol_vol": 0.3,
+            "kappa": 5,
+            "theta": 0.01,
+            "rho": -0.1
+        }
+    },
+    "Cases": [
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "RainbowCallOnMax",
+            "maturity": 1,
+            "strike": 112,
+            "Pi": "RainbowCallMaxBlack",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "RainbowCallOnMax",
+            "maturity": 1,
+            "strike": 105,
+            "Pi": "RainbowCallMaxBlack",
+            "fixing_times": []
+        },
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "BasketCall",
+            "maturity": 5,
+            "strike": 128,
+            "Pi": "BasketBachelier",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "BasketCall",
+            "maturity": 1,
+            "strike": 112,
+            "Pi": "BasketBachelier",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "BasketCall",
+            "maturity": 1,
+            "strike": 105,
+            "Pi": "BasketBachelier",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "BasketCall",
+            "maturity": 5,
+            "strike": 128,
+            "Pi": "BasketBachelier",
+            "fixing_times": []
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "BasketCall",
+            "maturity": 5,
+            "strike": 149,
+            "Pi": "BasketBachelier",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "BasketCall",
+            "maturity": 5,
+            "strike": 128,
+            "Pi": "BasketBachelier",
+            "fixing_times": []
+        }
+
+
+
+
+    ]
+}      

@@ -1,0 +1,238 @@
+{
+    "num_Legendre_points": 24,
+    "AffineElementType": "double",
+    "Process": {
+        "rate": 0.05,
+        "num_time_steps": 5e+4,
+        "num_mc_paths": 1e+6,
+        "Type": "Heston",
+        "Horizont" : 5,
+        "beta" :   1,
+        "Params": {
+            "init_vol": [ 0.01 ],
+            "init_asset": 100.0,
+            "kappa": 5,
+            "theta": 0.01,
+            "vol_vol": 0.3,
+            "rho": -0.1
+        }
+    },
+    "Cases": [
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 5,
+            "strike": 128,
+            "Pi": "BlackScholes",
+            "fixing_times": []
+        },
+        
+        {
+            "Name": "BlaBla",
+            "Payoff": "DownAndOutEuropCallPayoff",
+            "maturity": 1,
+            "strike": 105,
+            "Pi": "DownAndOutEuropCallPrice",
+            "fixing_times": [],
+            "barrier": 95
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "DownAndOutEuropCallPayoff",
+            "maturity": 1,
+            "strike": 112,
+            "Pi": "DownAndOutEuropCallPrice",
+            "fixing_times": [],
+            "barrier": 95
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCallAsian",
+            "maturity": 1,
+            "strike": 103,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 0.25, 0.5, 0.75, 1 ]
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCallAsian",
+            "maturity": 1,
+            "strike": 106,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 0.25, 0.5, 0.75, 1 ]
+        },
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 1,
+            "strike": 105,
+            "Pi": "BlackScholes",
+            "fixing_times": []
+        },
+
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 5,
+            "strike": 128,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 5 ]
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 5,
+            "strike": 149,
+            "Pi": "BlackScholes",
+            "fixing_times": []
+        },
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 5,
+            "strike": 149,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 5 ]
+        },
+
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCallAsian",
+            "maturity": 5,
+            "strike": 114,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5 ]
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCallAsian",
+            "maturity": 5,
+            "strike": 129,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5 ]
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "DownAndOutEuropCallPayoff",
+            "maturity": 5,
+            "strike": 128,
+            "Pi": "DownAndOutEuropCallPrice",
+            "fixing_times": [],
+            "barrier": 95
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "DownAndOutEuropCallPayoff",
+            "maturity": 5,
+            "strike": 149,
+            "Pi": "DownAndOutEuropCallPrice",
+            "fixing_times": [],
+            "barrier": 95
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 1,
+            "strike": 105,
+            "Pi": "BlackScholes",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 1,
+            "strike": 105,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 1 ]
+        },
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 1,
+            "strike": 112,
+            "Pi": "BlackScholes",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCall",
+            "maturity": 1,
+            "strike": 112,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 1 ]
+        },
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "DownAndOutEuropCallPayoff",
+            "maturity": 1,
+            "strike": 105,
+            "Pi": "DownAndOutEuropCallPrice",
+            "fixing_times": [],
+            "barrier": 95
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "DownAndOutEuropCallPayoff",
+            "maturity": 1,
+            "strike": 112,
+            "Pi": "DownAndOutEuropCallPrice",
+            "fixing_times": [],
+            "barrier": 95
+        },
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCallAsian",
+            "maturity": 1,
+            "strike": 103,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 0.25, 0.5, 0.75, 1 ]
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "EuropeanCallAsian",
+            "maturity": 1,
+            "strike": 106,
+            "Pi": "BachelierAsian",
+            "fixing_times": [ 0.25, 0.5, 0.75, 1 ]
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "LookbackCall",
+            "maturity": 1,
+            "Pi": "BlackLookbackCall",
+            "fixing_times": [],
+            "strike": 0
+        }
+
+
+
+
+
+
+
+
+
+
+
+    ]
+}      

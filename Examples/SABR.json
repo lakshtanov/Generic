@@ -1,0 +1,69 @@
+{
+    "num_Legendre_points": 24,
+    "AffineElementType": "Eigen::VectorXd",
+    "Process": {
+        "dim": 10,
+        "rate": 0.00,
+        "num_time_steps": 5e+4,
+        "num_mc_paths": 5e+3,
+        "Type": "SABR",
+        "Horizont": 5,
+        "beta": 0.5,
+        "Params": {
+            "init_vol": [ 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6],
+            "init_asset": 100,
+            "vol_vol": 0.4
+        }
+    },
+    "Cases": [
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "BasketCall",
+            "maturity": 5,
+            "strike": 146,
+            "Pi": "BasketBachelier",
+            "fixing_times": []
+        },
+
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "BasketCall",
+            "maturity": 5,
+            "strike": 146,
+            "Pi": "BasketBachelier",
+            "fixing_times": []
+
+        },
+        {
+            "Name": "BlaBla",
+            "Payoff": "RainbowCallOnMax",
+            "maturity": 1,
+            "strike": 100,
+            "Pi": "RainbowCallMaxBlack",
+            "fixing_times": []
+        },
+
+        {
+            "Name": "BlaBla",
+            "Payoff": "RainbowCallOnMax",
+            "maturity": 5,
+            "strike": 100,
+            "Pi": "RainbowCallMaxBlack",
+            "fixing_times": []
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+    ]
+}      
