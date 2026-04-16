@@ -70,10 +70,17 @@ public:
         vtype accumulated = 1.;
         pi_func.reset();
 
+        // Record the initial asset at t_0 so that later indexing lines up
+        // with simulation_times[k]:  sim_data.assets[k] = S at simulation_times[k].
+        // Without this, sim_data.assets[k] = S at simulation_times[k+1], which
+        // makes path-dependent payoffs (Asian, Lookback) off-by-one and OOB
+        // at the last fixing when it coincides with maturity (Asian 1Y bug).
+        sim_data.assets.push_back(process.getCurrentAsset());
+
         for (int t_i = 1; t_i < simulation_times.size(); ++t_i) {
             //if (dt == 0) continue;
             #ifdef PARALLEL_IMPLEMENTATION
-            if (idouble::recording) CAAD_LoopPulse(t_i);
+            if (idouble::isRecording()) CAAD_LoopPulse(t_i);
             #endif
             process.simulateAssetOneStep(simulation_times[t_i], random_samples[t_i]);
             pi_func.moveNextTime(simulation_times[t_i]);
@@ -122,6 +129,12 @@ public:
                 for (int i = 0; i < process.getAssetBM()->corrMatrixActualRank(); i++) {
                     curr_asset_p = process.getCurrentAsset() + eps * vol_corr_vect1[i];
                     curr_asset_m = process.getCurrentAsset() - eps * vol_corr_vect1[i];
+                    // Floor shocked assets at a tiny positive number so
+                    // closed-form Pi (e.g. BS with log(S/K)) does not
+                    // evaluate on a negative argument when the simulated
+                    // asset is near the process floor (0.01).
+                    curr_asset_p = aadcClampPositive(curr_asset_p);
+                    curr_asset_m = aadcClampPositive(curr_asset_m);
 
                     gamma_ass +=
                         pi_func(current_t, curr_asset_p, sim_data, fixing_times_indexes)
@@ -129,6 +142,8 @@ public:
                     ;
                     curr_asset_p = process.getCurrentAsset() + eps * vol_corr_vect2[i];
                     curr_asset_m = process.getCurrentAsset() - eps * vol_corr_vect2[i];
+                    curr_asset_p = aadcClampPositive(curr_asset_p);
+                    curr_asset_m = aadcClampPositive(curr_asset_m);
                     gamma_base +=
                         pi_func(current_t, curr_asset_p, sim_data, fixing_times_indexes)
                         + pi_func(current_t, curr_asset_m, sim_data, fixing_times_indexes)
@@ -136,7 +151,7 @@ public:
 
                 }
             }
-            vtype inc = accumulated * (gamma_ass - gamma_base) / (eps * eps); 
+            vtype inc = accumulated * (gamma_ass - gamma_base) / (eps * eps);
             one_path_impact += inc * dt;
             if (legendre_position != legendre_absciss_indexes.end()) {
                 auto it = legendre_position - legendre_absciss_indexes.begin();

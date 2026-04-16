@@ -197,50 +197,57 @@ inline void from_json(const json& data, std::shared_ptr<Pi<vtype>>& pi_func) {
     vtype blackscholes_beta = 1.;
     vtype bachelier_beta = 0.;
     vtype init_asset = data["init_asset"].template get<vtype>();
-    vtype sigma_m = data["declared_vol"].template get<vtype>();
-    std::cout << "Declared vol: " << sigma_m << std::endl;
+    vtype sigma_m_declared = data["declared_vol"].template get<vtype>();
+    vtype sigma_m = sigma_m_declared;
     vtype process_beta = data["process_beta"].template get<vtype>();
 
     double T = data["maturity"].template get<double>();
     vtype rate = data["rate"].template get<vtype>();
     std::string pi_type = data["Pi"].template get<std::string>();
     std::cout << std::setw(12)  << pi_type << ", Pi " << std::endl;
-    if (pi_type == "BlackScholes") {       
+    if (pi_type == "BlackScholes") {
         vtype beta = 1;
         sigma_m *= pow(init_asset, process_beta) / pow(init_asset, beta);
+        std::cout << "Declared vol: " << sigma_m_declared
+                  << " → Pi sigma (Black-Scholes, β=1): " << sigma_m << std::endl;
         jsonSanityCheck(data, "strike");
         vtype strike = data["strike"].template get<vtype>();
         std::cout << std::setw(12) << strike << ", strike" << std::endl;
-        pi_func = std::make_shared<BlackScholes>(strike, rate, sigma_m, T);        
+        pi_func = std::make_shared<BlackScholes>(strike, rate, sigma_m, T);
     } else
-    if (pi_type == "BachelierAsian") {       
+    if (pi_type == "BachelierAsian") {
         vtype beta = 0;
         sigma_m *= pow(init_asset, process_beta) / pow(init_asset, beta);
+        std::cout << "Declared vol: " << sigma_m_declared
+                  << " → Pi sigma (Bachelier, β=0): " << sigma_m << std::endl;
         jsonSanityCheck(data, "strike");
         vtype strike = data["strike"].template get<vtype>();
         std::cout << std::setw(12) << strike << ", strike" << std::endl;
-        std::vector<double> fixing_times = data["fixing_times"].get<std::vector<double>>(); 
+        std::vector<double> fixing_times = data["fixing_times"].get<std::vector<double>>();
         for (auto item : fixing_times) std::cout << item << " ";
         std::cout << ": AveragingTimes" << std::endl;
-        pi_func = std::make_shared<BachelierAsian>(strike, rate, sigma_m, T, fixing_times);        
-    } else 
+        pi_func = std::make_shared<BachelierAsian>(strike, rate, sigma_m, T, fixing_times);
+    } else
     if (pi_type == "BlackLookbackCall") {
         vtype beta = 1;
         sigma_m *=  pow(init_asset, process_beta) / pow(init_asset, beta);
-        std::cout << "sss" << sigma_m << std::endl;
+        std::cout << "Declared vol: " << sigma_m_declared
+                  << " → Pi sigma (Lookback, β=1): " << sigma_m << std::endl;
         vtype init_asset = data["init_asset"].template get<vtype>();
         pi_func = std::make_shared<BlackLookbackCall>(rate, sigma_m, T, init_asset);
     } else
-    if (pi_type == "DownAndOutEuropCallPrice") {       
+    if (pi_type == "DownAndOutEuropCallPrice") {
         vtype beta = 1;
         sigma_m *= pow(init_asset, process_beta) / pow(init_asset, beta);
+        std::cout << "Declared vol: " << sigma_m_declared
+                  << " → Pi sigma (Down-and-Out, β=1): " << sigma_m << std::endl;
         jsonSanityCheck(data, "strike");
         vtype strike = data["strike"].template get<vtype>();
-        std::vector<double> fixing_times = data["fixing_times"].get<std::vector<double>>(); 
+        std::vector<double> fixing_times = data["fixing_times"].get<std::vector<double>>();
         vtype barrier = data["barrier"].template get<vtype>();
         std::cout << std::setw(12) << barrier << ", barrier" << std::endl;
         std::vector<double> st= data["simulation_times"].template get<std::vector<double>>();
-        pi_func = std::make_shared<DownAndOutEuropCallPrice>(strike, rate, barrier, sigma_m, T, st);        
+        pi_func = std::make_shared<DownAndOutEuropCallPrice>(strike, rate, barrier, sigma_m, T, st);
     } else {
         throw std::runtime_error("Pi function specifier is not supported");
     }
