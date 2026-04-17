@@ -107,7 +107,7 @@ public:
             );
             vtype base;
             vtype eps=0.01, gamma_ass(0.), gamma_base(0.);
-            
+
             if (pi_func.barrierFactor) {
                 accumulated *= (*pi_func.barrierFactor)(process.getCurrentAsset());
             }
@@ -129,10 +129,6 @@ public:
                 for (int i = 0; i < process.getAssetBM()->corrMatrixActualRank(); i++) {
                     curr_asset_p = process.getCurrentAsset() + eps * vol_corr_vect1[i];
                     curr_asset_m = process.getCurrentAsset() - eps * vol_corr_vect1[i];
-                    // Floor shocked assets at a tiny positive number so
-                    // closed-form Pi (e.g. BS with log(S/K)) does not
-                    // evaluate on a negative argument when the simulated
-                    // asset is near the process floor (0.01).
                     curr_asset_p = aadcClampPositive(curr_asset_p);
                     curr_asset_m = aadcClampPositive(curr_asset_m);
 
@@ -325,7 +321,7 @@ public:
                 aad_funcs.forward(*ws);
                 
                 mm_impacts_per_thread[mc_i] = ws->val(one_path_impact_arg);
-                mm_payoffs_per_thread[mc_i] = ws->val(payoff_arg); 
+                mm_payoffs_per_thread[mc_i] = ws->val(payoff_arg);
                 mm_quadratures_per_thread[mc_i] = ws->val(one_path_quadr_arg); 
                 ws->resetDiff();
                 ws->setDiff(one_path_impact_arg, 0.);
@@ -374,12 +370,15 @@ public:
         std::vector<double> mean_diff_p(asset_args.size(), 0.), mean_diff_q(asset_args.size(), 0.);
         double mean_sqd_integral(0.), mean_sqd_payoff(0.),  mean_sqd_quadratures(0.);
         std::vector<double> mean_sqd_p(asset_args.size(), 0.), mean_sqd_q(asset_args.size(), 0.);
+        double quadr_min = 1e30, quadr_max = -1e30;
         for (int th_i=0; th_i < num_threads; th_i++) {
             for (int mc_i=0; mc_i < paths_per_thread; mc_i++) {
-                for (int avx_i=0; avx_i<AVXsize; avx_i++) { 
+                for (int avx_i=0; avx_i<AVXsize; avx_i++) {
                     double v_i = toDblPtr(mm_impacts[th_i][mc_i])[avx_i];
                     double v_p = toDblPtr(mm_payoffs[th_i][mc_i])[avx_i];
                     double v_q = toDblPtr(mm_quadratures[th_i][mc_i])[avx_i];
+                    quadr_min = std::min(quadr_min, v_q);
+                    quadr_max = std::max(quadr_max, v_q);
                     for (int dim_i=0; dim_i<asset_args.size(); dim_i++){
                         double diff_p = toDblPtr(mm_diff_p[th_i][dim_i][mc_i])[avx_i];
                         double diff_q = toDblPtr(mm_diff_q[th_i][dim_i][mc_i])[avx_i];
@@ -439,6 +438,10 @@ public:
                 << std::setw(12)
                 << std::sqrt(mean_sqd_quadratures - mean_quadratures * mean_quadratures) / std::sqrt(num_mc_paths)
                 << ", stdev (Quadrature): " << std::endl
+            ;
+            std::cout
+                << std::setw(12) << quadr_min << ", Quadr(min path)" << std::endl
+                << std::setw(12) << quadr_max << ", Quadr(max path)" << std::endl
             ;
 
             //std::cout << "\033[34m" << "\nAnalytic Deltas: \033[37m" << std::endl;

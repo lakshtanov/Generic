@@ -49,3 +49,28 @@ aadcClampPositive(const Eigen::Matrix<vtype, Eigen::Dynamic, 1>& v) {
     for (int i = 0; i < v.size(); ++i) r[i] = std::max(v[i], vtype(1e-10));
     return r;
 }
+
+// Extract a plain double from vtype (which may be idouble in AADC build).
+inline double toDouble(const double& x) { return x; }
+#ifdef PARALLEL_IMPLEMENTATION
+inline double toDouble(const idouble& x) { return x.val; }
+#endif
+
+// Adaptive FD step-size: keep |eps * d_component| ≤ max_shock for all
+// components. Returns eps_local = min(eps_default, max_shock / ||d||_∞).
+// For scalar direction (1-dim process), ||d||_∞ = |d|.
+inline vtype adaptiveEps(const vtype& direction,
+                         double eps_default, double max_shock) {
+    double dir_inf = std::abs(toDouble(direction));
+    if (dir_inf < 1e-30) return vtype(eps_default);
+    return vtype(std::min(eps_default, max_shock / dir_inf));
+}
+
+inline vtype adaptiveEps(const Eigen::Matrix<vtype, Eigen::Dynamic, 1>& direction,
+                         double eps_default, double max_shock) {
+    double dir_inf = 0;
+    for (int i = 0; i < direction.size(); ++i)
+        dir_inf = std::max(dir_inf, std::abs(toDouble(direction[i])));
+    if (dir_inf < 1e-30) return vtype(eps_default);
+    return vtype(std::min(eps_default, max_shock / dir_inf));
+}
