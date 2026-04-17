@@ -225,9 +225,15 @@ public:
         this->curr_asset += dWt.cwiseProduct(this->curr_asset.cwiseSqrt().cwiseProduct(this->curr_vol));
         this->curr_asset = this->curr_asset.cwiseMax(0.0001);
 
-        this->curr_vol += this->curr_vol.cwiseProduct(
-            vol_vol.cwiseProduct(random_sample[1] * std::sqrt(dt))
-        );
+        // Log-normal vol step (matches SabrScalar's exp() scheme).
+        // Plain Euler  v += v·α·√dt·Z  has thicker tails → extreme-vol
+        // paths blow up the FD Hessian in the Legendre integrand.
+        for (int i = 0; i < dim; i++) {
+            this->curr_vol[i] *= std::exp(
+                vol_vol[i] * std::sqrt(dt) * random_sample[1][i]
+                - 0.5 * vol_vol[i] * vol_vol[i] * dt
+            );
+        }
     }
 
 private:
