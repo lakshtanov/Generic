@@ -240,7 +240,7 @@ def run_case(process_params, case, n_steps, n_paths, n_legendre=12):
                           process_params["vol_vol"], process_params["rho"], rate)
     S_init = proc.init_state()
     S_arg = S_init.mark_as_input()
-    proc.v.mark_as_input()  # track v for recording
+    v_arg = proc.v.mark_as_input()  # track v for recording
 
     # Random inputs
     z_args = []
@@ -265,47 +265,55 @@ def run_case(process_params, case, n_steps, n_paths, n_legendre=12):
 
     # Replay
     rng = np.random.default_rng(42)
-    inputs = {S_arg: np.full(n_paths, S0)}
-    # v_arg: use same v0 for all paths
-    # (v was marked as input, need to provide it)
-    # find v_arg... it's the second mark_as_input
-    # Actually aadc.evaluate needs ALL inputs. We marked S and v.
-    # For simplicity, we'll set v via the same mechanism.
-    # But we don't have v_arg stored... Let me fix.
-
-    funcs.stop_recording  # already stopped
-    # Rebuild to store v_arg properly
-    # Actually the kernel is already recorded. v was marked as input
-    # but we didn't store its Argument. This is a bug.
-    # For now, let's just try — evaluate may handle it.
-
+    inputs = {
+        S_arg: np.full(n_paths, S0),
+        v_arg: np.full(n_paths, v0),
+    }
     for za in z_args:
         inputs[za] = rng.standard_normal(n_paths)
 
-    request = {payoff_res: [S_arg], quadr_res: [S_arg]}
+    # Request all 3 outputs + derivatives of payoff and quadrature w.r.t. S0
+    request = {
+        payoff_res: [S_arg],
+        impact_res: [],
+        quadr_res: [S_arg],
+    }
     workers = aadc.ThreadPool(1)
     results = aadc.evaluate(funcs, request, inputs, workers)
 
     payoffs = results[0][payoff_res]
-    impacts = results[0][impact_res] if impact_res in results[0] else np.zeros(n_paths)
+    impacts = results[0][impact_res]
     quadrs = results[0][quadr_res]
-    delta_p = results[1][payoff_res][S_arg]  # d(payoff)/dS
-    delta_q = results[1][quadr_res][S_arg]   # d(quadrature)/dS
+    delta_p = results[1][payoff_res][S_arg]
+    delta_q = results[1][quadr_res][S_arg]
 
     price_raw = np.mean(payoffs)
     se_raw = np.std(payoffs) / np.sqrt(n_paths)
-    price_dmc = np.mean(payoffs - quadrs)
-    se_dmc = np.std(payoffs - quadrs) / np.sqrt(n_paths)
+    # DMC: corrected price = payoff - quadrature (C++ formula)
+    corrected = payoffs - quadrs
+    price_dmc = np.mean(corrected)
+    se_dmc = np.std(corrected) / np.sqrt(n_paths)
     delta_payoff = np.mean(delta_p)
     delta_quadr = np.mean(delta_q)
     delta_dmc = delta_payoff - delta_quadr
 
     vr = se_raw / se_dmc if se_dmc > 1e-12 else float('inf')
 
-    print(f"  {payoff_type} K={strike} T={maturity}")
-    print(f"    Raw:   {price_raw:.4f} ± {se_raw:.4f}")
-    print(f"    DMC:   {price_dmc:.4f} ± {se_dmc:.4f}  (VR: {vr:.0f}×)")
-    print(f"    Delta: payoff={delta_payoff:.4f}  quadr={delta_quadr:.4f}  DMC={delta_dmc:.4f}")
+    # Bump-and-reval for validation
+    h = 0.5
+    inp_up = dict(inputs); inp_up[S_arg] = np.full(n_paths, S0 + h)
+    inp_dn = dict(inputs); inp_dn[S_arg] = np.full(n_paths, S0 - h)
+    r_up = aadc.evaluate(funcs, {payoff_res: []}, inp_up, workers)
+    r_dn = aadc.evaluate(funcs, {payoff_res: []}, inp_dn, workers)
+    bump_delta = (np.mean(r_up[0][payoff_res]) - np.mean(r_dn[0][payoff_res])) / (2 * h)
+
+    print(f"  {payoff_type} K={strike} T={maturity}" +
+          (f" fix={len(fixing_times)}" if fixing_times else ""))
+    print(f"    Raw:       {price_raw:.4f} ± {se_raw:.4f}")
+    print(f"    DMC:       {price_dmc:.4f} ± {se_dmc:.4f}  (VR: {vr:.1f}×)")
+    print(f"    Impact:    {np.mean(impacts):.4f}")
+    print(f"    Delta:     AAD={delta_payoff:.4f}  bump={bump_delta:.4f}  diff={abs(delta_payoff-bump_delta):.1e}")
+    print(f"    DMC delta: {delta_dmc:.4f}")
 
 
 # =================== MAIN ===================
