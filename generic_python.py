@@ -142,27 +142,25 @@ def bachelier_asian_id(S, K, r, vol, T, fixing_times, sim_data_assets, fixing_id
 def lookback_call_id(S, r, vol, T, min_S):
     """Black lookback call Pi in idouble — exact port of C++ BlackLookbackCall::operator()."""
     T_safe = max(float(T), 0.001)
-    T_c = aadc.idouble(T_safe)
-    sq_t = T_c.sqrt()
-    vol_c = aadc.idouble(vol)
-    r_c = aadc.idouble(r)
-    d_p = aadc.idouble(r + vol*vol/2)
-    d_m = aadc.idouble(r - vol*vol/2)
+    r_safe = max(r, 0.05)  # match C++
+    sq_t = aadc.idouble(np.sqrt(T_safe))
+    d_p_val = r_safe + vol*vol/2
+    d_m_val = r_safe - vol*vol/2
 
     c1 = (S / min_S).log()
-    div = vol_c * sq_t
-    a1 = (c1 + d_p * T_c) / div
-    a2 = (c1 + d_m * T_c) / div
-    a3 = (c1 - d_m * T_c) / div
+    div = aadc.idouble(vol) * sq_t
+    a1 = (c1 + aadc.idouble(d_p_val * T_safe)) / div
+    a2 = (c1 + aadc.idouble(d_m_val * T_safe)) / div
+    a3 = (c1 - aadc.idouble(d_m_val * T_safe)) / div
 
-    disc = (r_c * T_c).exp()
-    half_vol2_over_r = aadc.idouble(vol*vol / (2*r))
+    disc = aadc.idouble(np.exp(r_safe * T_safe))
+    half_vol2_over_r = aadc.idouble(vol*vol / (2*r_safe))
 
     price = (disc * S * cdf_normal_id(a1)
              - min_S * cdf_normal_id(a2)
              - disc * S * half_vol2_over_r * (
                  cdf_normal_id(aadc.idouble(-1.0) * a1)
-                 - (aadc.idouble(-1.0) * c1 * aadc.idouble(2*r/(vol*vol)) - r_c * T_c).exp()
+                 - (aadc.idouble(-1.0) * c1 * aadc.idouble(2*r_safe/(vol*vol)) - aadc.idouble(r_safe * T_safe)).exp()
                    * cdf_normal_id(aadc.idouble(-1.0) * a3)
              ))
     return price
@@ -223,6 +221,37 @@ class HestonProcess:
     def get_pi_vol(self):
         """Implied vol for Pi: sqrt(v0) constant."""
         return np.sqrt(self.v0)
+
+
+class SabrScalarProcess:
+    """SABR scalar process: dS = sqrt(S)*σ*dW + Milstein, σ lognormal."""
+    def __init__(self, S0, v0, vol_vol, rate=0, beta=0.5):
+        self.S0, self.v0, self.vol_vol, self.rate, self.beta = S0, v0, vol_vol, rate, beta
+        self.S = None
+        self.v = None
+
+    def init_state(self):
+        self.S = aadc.idouble(self.S0)
+        self.v = aadc.idouble(self.v0)
+        return self.S
+
+    def step(self, dt, z1, z2):
+        sqrt_dt = np.sqrt(dt)
+        half = aadc.idouble(0.5)
+        S_pos = (self.S * self.S + aadc.idouble(1e-16)).sqrt()
+        aux_s = S_pos.sqrt() * self.v
+        millst = half * half * aux_s * aux_s / S_pos * (z1 * z1 - aadc.idouble(1.0)) * aadc.idouble(dt)
+        self.S = self.S + aux_s * aadc.idouble(sqrt_dt) * z1 + millst
+        self.S = (self.S + (self.S * self.S + aadc.idouble(0.0001)).sqrt()) * half
+        vv = aadc.idouble(self.vol_vol)
+        self.v = self.v * (vv * aadc.idouble(sqrt_dt) * z2 - vv * vv * half * aadc.idouble(dt)).exp()
+
+    def get_vol_of_asset(self):
+        S_pos = (self.S * self.S + aadc.idouble(1e-16)).sqrt()
+        return S_pos.sqrt() * self.v
+
+    def get_pi_vol(self):
+        return self.v0 * self.S0 ** (self.beta - 1)
 
 
 # =================== ONE PATH PRICING (exact port of C++) ===================
@@ -324,32 +353,45 @@ def one_path_pricing(process, sim_times, z_vars, legendre_idxs, legendre_weights
 
     # Payoff
     disc = aadc.idouble(np.exp(-rate * maturity))
-    if payoff_type == "EuropeanCall":
-        diff = process.S - aadc.idouble(strike)
-        payoff = (diff + (diff * diff + aadc.idouble(0.01)).sqrt()) * half * disc
-    elif payoff_type == "EuropeanCallAsian" and fixing_idxs:
+    S_final = process.S
+
+    if payoff_type == "EuropeanCallAsian" and fixing_idxs:
         avg = aadc.idouble(0.0)
         for fi in fixing_idxs:
             if fi < len(asset_history):
                 avg = avg + asset_history[fi]
         avg = avg / aadc.idouble(float(len(fixing_idxs)))
         diff = avg - aadc.idouble(strike)
-        payoff = (diff + (diff * diff + aadc.idouble(0.01)).sqrt()) * half * disc
+    elif payoff_type == "LookbackCall":
+        # min_S from asset_history
+        min_S = asset_history[0]
+        for ah in asset_history[1:]:
+            d_ms = min_S - ah
+            min_S = (min_S + ah - (d_ms * d_ms + aadc.idouble(0.01)).sqrt()) * half
+        diff = S_final - min_S
     else:
-        diff = process.S - aadc.idouble(strike)
-        payoff = (diff + (diff * diff + aadc.idouble(0.01)).sqrt()) * half * disc
+        # EuropeanCall, DownAndOutEuropCallPayoff
+        diff = S_final - aadc.idouble(strike)
+
+    raw_payoff = (diff + (diff * diff + aadc.idouble(0.01)).sqrt()) * half * disc
+
+    # Apply barrier knock-out
+    if barrier > 0 and payoff_type == "DownAndOutEuropCallPayoff":
+        payoff = raw_payoff * accumulated
+    else:
+        payoff = raw_payoff
 
     return payoff, one_path_impact_out, one_path_quadr_out
 
 
 # =================== KERNEL RECORD + REPLAY ===================
 
-def run_case(process_params, case, n_steps, n_paths, n_legendre=12):
+def run_case(process_type, process_params, case, n_steps, n_paths, n_legendre=12):
     """Record kernel, replay, compute DMC price + Greeks."""
 
     S0 = process_params["init_asset"]
     v0 = process_params["init_vol"][0]
-    rate = process_params.get("rate", 0.05)
+    rate = process_params.get("rate", 0.0)
     maturity = case["maturity"]
     strike = case.get("strike", 100)
     barrier = case.get("barrier", 0)
@@ -379,11 +421,17 @@ def run_case(process_params, case, n_steps, n_paths, n_legendre=12):
     funcs = aadc.Functions()
     funcs.start_recording()
 
-    proc = HestonProcess(S0, v0, process_params["kappa"], process_params["theta"],
-                          process_params["vol_vol"], process_params["rho"], rate)
+    if process_type in ("Heston",):
+        proc = HestonProcess(S0, v0, process_params["kappa"], process_params["theta"],
+                              process_params["vol_vol"], process_params["rho"], rate)
+    elif process_type == "SabrScalar":
+        proc = SabrScalarProcess(S0, v0, process_params["vol_vol"], rate,
+                                  process_params.get("beta", 0.5))
+    else:
+        raise ValueError(f"Unknown process: {process_type}")
     S_init = proc.init_state()
     S_arg = S_init.mark_as_input()
-    v_arg = proc.v.mark_as_input()  # track v for recording
+    v_arg = proc.v.mark_as_input()
 
     # Random inputs
     z_args = []
@@ -474,18 +522,20 @@ def main():
     n_steps = min(int(proc["num_time_steps"]), 200)  # cap for Python speed
     n_paths = min(int(proc["num_mc_paths"]), 50000)
     params = proc["Params"]
-    params["rate"] = proc.get("rate", 0.05)
+    params["rate"] = proc.get("rate", 0.0)
+    params["beta"] = proc.get("beta", 1.0)
+    process_type = proc["Type"]
 
     print(f"Generic Python — DMC (full Legendre) via AADC 1.8.0")
     print(f"Config: {config_file}")
-    print(f"Process: {proc['Type']}, S0={params['init_asset']}, v0={params['init_vol']}")
+    print(f"Process: {process_type}, S0={params['init_asset']}, v0={params['init_vol']}")
     print(f"Steps: {n_steps}, Paths: {n_paths}, Legendre: {n_legendre}")
     print("=" * 60)
 
-    for i, case in enumerate(config["Cases"][:5]):  # first 5 cases for now
-        print(f"\nCase {i+1}:")
+    for i, case in enumerate(config["Cases"]):
+        print(f"\nCase {i+1}/{len(config['Cases'])}:")
         try:
-            run_case(params, case, n_steps, n_paths, n_legendre)
+            run_case(process_type, params, case, n_steps, n_paths, n_legendre)
         except Exception as e:
             print(f"  ERROR: {e}")
             import traceback; traceback.print_exc()
