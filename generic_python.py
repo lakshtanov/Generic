@@ -223,6 +223,64 @@ class HestonProcess:
         return np.sqrt(self.v0)
 
 
+class HestonMultiDimProcess:
+    """Multi-asset Heston: d independent Heston processes (no asset-asset correlation)."""
+    def __init__(self, S0, v0_list, kappa, theta, vol_vol, rho, rate, dim):
+        self.S0, self.v0_list = S0, v0_list
+        self.kappa, self.theta, self.vol_vol, self.rho, self.rate = kappa, theta, vol_vol, rho, rate
+        self.sqrt_1mrho2 = np.sqrt(1 - rho**2)
+        self.dim = dim
+        self.S_vec = None
+        self.v_vec = None
+        self.S = None  # first asset (for compat)
+        self.v = None
+
+    def init_state(self):
+        self.S_vec = [aadc.idouble(self.S0) for _ in range(self.dim)]
+        self.v_vec = [aadc.idouble(self.v0_list[i]) for i in range(self.dim)]
+        self.S = self.S_vec[0]
+        self.v = self.v_vec[0]
+        return self.S_vec[0]
+
+    def mark_all_inputs(self):
+        """Mark all assets and vols as inputs, return first S_arg."""
+        args = []
+        for i in range(self.dim):
+            args.append(self.S_vec[i].mark_as_input())
+        for i in range(self.dim):
+            args.append(self.v_vec[i].mark_as_input())
+        return args[0]  # S_arg for first asset
+
+    def step(self, dt, z_list):
+        """z_list: [z_s_0, z_s_1, ..., z_s_{d-1}, z_v_0, ..., z_v_{d-1}]."""
+        sqrt_dt = np.sqrt(dt)
+        half = aadc.idouble(0.5)
+        for i in range(self.dim):
+            z_s = z_list[i]
+            z_v = z_list[self.dim + i]
+            vi = self.v_vec[i]
+            v_pos = (vi * vi + aadc.idouble(1e-16)).sqrt()
+            sqrt_v = v_pos.sqrt()
+            dW_S = z_s * aadc.idouble(sqrt_dt)
+            dW_v = (aadc.idouble(self.rho) * z_s + aadc.idouble(self.sqrt_1mrho2) * z_v) * aadc.idouble(sqrt_dt)
+            self.S_vec[i] = self.S_vec[i] * ((aadc.idouble(self.rate) - v_pos * half) * aadc.idouble(dt) + sqrt_v * dW_S).exp()
+            self.v_vec[i] = vi + aadc.idouble(self.kappa) * (aadc.idouble(self.theta) - v_pos) * aadc.idouble(dt) + aadc.idouble(self.vol_vol) * sqrt_v * dW_v
+        self.S = self.S_vec[0]
+
+    def get_vol_of_asset(self):
+        v_pos = (self.v_vec[0] * self.v_vec[0] + aadc.idouble(1e-16)).sqrt()
+        return v_pos.sqrt() * self.S_vec[0]
+
+    def get_pi_vol(self):
+        return np.sqrt(self.v0_list[0])
+
+    def get_basket(self):
+        basket = aadc.idouble(0.0)
+        for i in range(self.dim):
+            basket = basket + self.S_vec[i]
+        return basket / aadc.idouble(float(self.dim))
+
+
 class SabrScalarProcess:
     """SABR scalar process: dS = sqrt(S)*σ*dW + Milstein, σ lognormal."""
     def __init__(self, S0, v0, vol_vol, rate=0, beta=0.5):
@@ -277,8 +335,11 @@ def one_path_pricing(process, sim_times, z_vars, legendre_idxs, legendre_weights
 
     for t_i in range(1, len(sim_times)):
         dt = sim_times[t_i] - sim_times[t_i - 1]
-        z1, z2 = z_vars[t_i]
-        process.step(dt, z1, z2)
+        zs = z_vars[t_i]
+        if hasattr(process, 'S_vec'):  # multi-dim
+            process.step(dt, zs)
+        else:  # scalar: first two z's
+            process.step(dt, zs[0], zs[1])
         current_t = sim_times[t_i]
         S_curr = process.S
         asset_history.append(S_curr)
@@ -355,7 +416,9 @@ def one_path_pricing(process, sim_times, z_vars, legendre_idxs, legendre_weights
     disc = aadc.idouble(np.exp(-rate * maturity))
     S_final = process.S
 
-    if payoff_type == "EuropeanCallAsian" and fixing_idxs:
+    if payoff_type == "BasketCall" and hasattr(process, 'get_basket'):
+        diff = process.get_basket() - aadc.idouble(strike)
+    elif payoff_type == "EuropeanCallAsian" and fixing_idxs:
         avg = aadc.idouble(0.0)
         for fi in fixing_idxs:
             if fi < len(asset_history):
@@ -421,27 +484,45 @@ def run_case(process_type, process_params, case, n_steps, n_paths, n_legendre=12
     funcs = aadc.Functions()
     funcs.start_recording()
 
-    if process_type in ("Heston",):
+    dim = process_params.get("dim", 1)
+    is_multi = process_type in ("HestonMultDim",)
+    v0_list = process_params["init_vol"]
+
+    if process_type == "Heston":
         proc = HestonProcess(S0, v0, process_params["kappa"], process_params["theta"],
                               process_params["vol_vol"], process_params["rho"], rate)
+        S_init = proc.init_state()
+        S_arg = S_init.mark_as_input()
+        v_arg = proc.v.mark_as_input()
+        n_rand_per_step = 2
+    elif process_type == "HestonMultDim":
+        proc = HestonMultiDimProcess(S0, v0_list, process_params["kappa"],
+                                      process_params["theta"], process_params["vol_vol"],
+                                      process_params["rho"], rate, dim)
+        proc.init_state()
+        S_arg = proc.mark_all_inputs()
+        v_arg = None  # already marked inside
+        n_rand_per_step = 2 * dim
     elif process_type == "SabrScalar":
         proc = SabrScalarProcess(S0, v0, process_params["vol_vol"], rate,
                                   process_params.get("beta", 0.5))
+        S_init = proc.init_state()
+        S_arg = S_init.mark_as_input()
+        v_arg = proc.v.mark_as_input()
+        n_rand_per_step = 2
     else:
         raise ValueError(f"Unknown process: {process_type}")
-    S_init = proc.init_state()
-    S_arg = S_init.mark_as_input()
-    v_arg = proc.v.mark_as_input()
 
-    # Random inputs
+    # Random inputs: n_rand_per_step normals per time step
     z_args = []
     z_vars = [None]  # index 0 unused (sim starts at t_i=1)
     for _ in range(n_steps):
-        z1 = aadc.idouble(0.0)
-        z2 = aadc.idouble(0.0)
-        z_args.append(z1.mark_as_input_no_diff())
-        z_args.append(z2.mark_as_input_no_diff())
-        z_vars.append((z1, z2))
+        zs = []
+        for _ in range(n_rand_per_step):
+            z = aadc.idouble(0.0)
+            z_args.append(z.mark_as_input_no_diff())
+            zs.append(z)
+        z_vars.append(zs)
 
     pi_type = case.get("Pi", "BlackScholes")
     payoff, impact, quadr = one_path_pricing(
@@ -458,10 +539,9 @@ def run_case(process_type, process_params, case, n_steps, n_paths, n_legendre=12
 
     # Replay
     rng = np.random.default_rng(42)
-    inputs = {
-        S_arg: np.full(n_paths, S0),
-        v_arg: np.full(n_paths, v0),
-    }
+    inputs = {S_arg: np.full(n_paths, S0)}
+    if v_arg is not None:
+        inputs[v_arg] = np.full(n_paths, v0)
     for za in z_args:
         inputs[za] = rng.standard_normal(n_paths)
 
