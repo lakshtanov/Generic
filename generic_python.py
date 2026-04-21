@@ -281,6 +281,63 @@ class HestonMultiDimProcess:
         return basket / aadc.idouble(float(self.dim))
 
 
+class SabrMultiDimProcess:
+    """Multi-asset SABR: d independent SABR processes."""
+    def __init__(self, S0, v0_list, vol_vol, rate=0, beta=0.5, dim=1):
+        self.S0, self.v0_list, self.vol_vol = S0, v0_list, vol_vol
+        self.rate, self.beta, self.dim = rate, beta, dim
+        self.S_vec = None
+        self.v_vec = None
+        self.S = None
+        self.v = None
+
+    def init_state(self):
+        self.S_vec = [aadc.idouble(self.S0) for _ in range(self.dim)]
+        self.v_vec = [aadc.idouble(self.v0_list[i]) for i in range(self.dim)]
+        self.S = self.S_vec[0]
+        self.v = self.v_vec[0]
+        return self.S_vec[0]
+
+    def mark_all_inputs(self):
+        args = []
+        for i in range(self.dim):
+            args.append(self.S_vec[i].mark_as_input())
+        for i in range(self.dim):
+            args.append(self.v_vec[i].mark_as_input())
+        return args[0]
+
+    def step(self, dt, z_list):
+        sqrt_dt = np.sqrt(dt)
+        half = aadc.idouble(0.5)
+        vv = aadc.idouble(self.vol_vol)
+        for i in range(self.dim):
+            z_s = z_list[i]
+            z_v = z_list[self.dim + i]
+            Si = self.S_vec[i]
+            vi = self.v_vec[i]
+            Si_pos = (Si * Si + aadc.idouble(1e-16)).sqrt()
+            aux = Si_pos.sqrt() * vi
+            millst = half * half * aux * aux / Si_pos * (z_s * z_s - aadc.idouble(1.0)) * aadc.idouble(dt)
+            Si = Si + aux * aadc.idouble(sqrt_dt) * z_s + millst
+            self.S_vec[i] = (Si + (Si * Si + aadc.idouble(0.0001)).sqrt()) * half
+            self.v_vec[i] = vi * (vv * aadc.idouble(sqrt_dt) * z_v - vv * vv * half * aadc.idouble(dt)).exp()
+        self.S = self.S_vec[0]
+
+    def get_vol_of_asset(self):
+        Si = self.S_vec[0]
+        Si_pos = (Si * Si + aadc.idouble(1e-16)).sqrt()
+        return Si_pos.sqrt() * self.v_vec[0]
+
+    def get_pi_vol(self):
+        return self.v0_list[0] * self.S0 ** (self.beta - 1)
+
+    def get_basket(self):
+        basket = aadc.idouble(0.0)
+        for i in range(self.dim):
+            basket = basket + self.S_vec[i]
+        return basket / aadc.idouble(float(self.dim))
+
+
 class SabrScalarProcess:
     """SABR scalar process: dS = sqrt(S)*σ*dW + Milstein, σ lognormal."""
     def __init__(self, S0, v0, vol_vol, rate=0, beta=0.5):
@@ -416,7 +473,15 @@ def one_path_pricing(process, sim_times, z_vars, legendre_idxs, legendre_weights
     disc = aadc.idouble(np.exp(-rate * maturity))
     S_final = process.S
 
-    if payoff_type == "BasketCall" and hasattr(process, 'get_basket'):
+    if payoff_type == "RainbowCallOnMax" and hasattr(process, 'S_vec'):
+        # max(max(S_1,...,S_d) - K, 0)
+        max_S = process.S_vec[0]
+        for i in range(1, process.dim):
+            # smooth max: (a+b+sqrt((a-b)^2+eps))/2
+            d_ab = max_S - process.S_vec[i]
+            max_S = (max_S + process.S_vec[i] + (d_ab * d_ab + aadc.idouble(0.01)).sqrt()) * half
+        diff = max_S - aadc.idouble(strike)
+    elif payoff_type == "BasketCall" and hasattr(process, 'get_basket'):
         diff = process.get_basket() - aadc.idouble(strike)
     elif payoff_type == "EuropeanCallAsian" and fixing_idxs:
         avg = aadc.idouble(0.0)
@@ -485,7 +550,7 @@ def run_case(process_type, process_params, case, n_steps, n_paths, n_legendre=12
     funcs.start_recording()
 
     dim = process_params.get("dim", 1)
-    is_multi = process_type in ("HestonMultDim",)
+    is_multi = process_type in ("HestonMultDim",) or (process_type == "SABR" and dim > 1)
     v0_list = process_params["init_vol"]
 
     if process_type == "Heston":
@@ -503,7 +568,14 @@ def run_case(process_type, process_params, case, n_steps, n_paths, n_legendre=12
         S_arg = proc.mark_all_inputs()
         v_arg = None  # already marked inside
         n_rand_per_step = 2 * dim
-    elif process_type == "SabrScalar":
+    elif process_type == "SABR" and dim > 1:
+        proc = SabrMultiDimProcess(S0, v0_list, process_params["vol_vol"], rate,
+                                    process_params.get("beta", 0.5), dim)
+        proc.init_state()
+        S_arg = proc.mark_all_inputs()
+        v_arg = None
+        n_rand_per_step = 2 * dim
+    elif process_type in ("SabrScalar", "SABR"):
         proc = SabrScalarProcess(S0, v0, process_params["vol_vol"], rate,
                                   process_params.get("beta", 0.5))
         S_init = proc.init_state()
