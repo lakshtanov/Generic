@@ -71,6 +71,124 @@ def bs_call_id(S, K, r, vol, T):
     return S * Nd1 - aadc.idouble(K * np.exp(-r * float(T))) * Nd2
 
 
+def cdf_normal_id(x):
+    """N(x) in idouble via erf."""
+    sqrt2_inv = aadc.idouble(1.0 / np.sqrt(2))
+    return (aadc.idouble(1.0) + (x * sqrt2_inv).erf()) * aadc.idouble(0.5)
+
+
+def pdf_normal_id(x):
+    """n(x) in idouble."""
+    return (x * x * aadc.idouble(-0.5)).exp() / aadc.idouble(np.sqrt(2 * np.pi))
+
+
+def down_out_call_id(S, K, r, vol, T, barrier):
+    """Down-and-out European call in idouble. Pi = BS(S) - (S/B)^(1-κ) * BS(B²/S)."""
+    kappa = 2 * r / (vol * vol)
+    bs_direct = bs_call_id(S, K, r, vol, T)
+    B = aadc.idouble(barrier)
+    # (S/B)^(1-κ): use exp((1-κ)*log(S/B))
+    log_SB = (S / B).log()
+    reflection_factor = (aadc.idouble(1 - kappa) * log_SB).exp()
+    reflected_S = B * B / S
+    bs_reflected = bs_call_id(reflected_S, K, r, vol, T)
+    return bs_direct - reflection_factor * bs_reflected
+
+
+def bachelier_asian_id(S, K, r, vol, T, fixing_times, sim_data_assets, fixing_idxs, current_t):
+    """Bachelier Asian Pi in idouble — exact port of C++ BachelierAsian::operator()."""
+    n = len(fixing_times)
+    if n == 0:
+        return bs_call_id(S, K, r, vol, T)
+
+    # Precompute coefficients (plain double, same as C++ constructor)
+    r_safe = max(r, 1e-6)
+    mu_coeff = [0.0] * (n + 1)
+    sigma_coeff1 = [0.0] * (n + 1)
+    sigma_coeff2 = [0.0] * (n + 1)
+    for k in range(n - 1, -1, -1):
+        mu_coeff[k] = mu_coeff[k+1] + np.exp(r_safe * fixing_times[k])
+        sigma_coeff1[k] = sigma_coeff1[k+1] + 0.5 * np.exp(r_safe * 2 * fixing_times[k])
+        sigma_coeff2[k] = 0.5 + sigma_coeff2[k+1]
+        for l in range(k+1, n):
+            sigma_coeff1[k] += np.exp(r_safe * (fixing_times[k] + fixing_times[l]))
+            sigma_coeff2[k] += np.exp(r_safe * abs(fixing_times[k] - fixing_times[l]))
+
+    # Find which fixings are already past
+    k_idx = 0
+    for i, ft in enumerate(fixing_times):
+        if ft < current_t:
+            k_idx = i + 1
+
+    # Average of past fixings
+    avg_past = aadc.idouble(0.0)
+    for t_i in range(k_idx):
+        if t_i < len(fixing_idxs) and fixing_idxs[t_i] < len(sim_data_assets):
+            avg_past = avg_past + sim_data_assets[fixing_idxs[t_i]]
+
+    # mu = (S * mu_coeff[k] * exp(-r*t) + avg_past) / n
+    mu = (S * aadc.idouble(mu_coeff[k_idx] * np.exp(-r_safe * current_t)) + avg_past) / aadc.idouble(float(n))
+
+    # sigma
+    sqrt_helper = max(sigma_coeff1[k_idx] * np.exp(-2*r_safe*current_t) - sigma_coeff2[k_idx], 0.0) / r_safe
+    sqrt_helper = max(sqrt_helper, 1e-6)
+    sigma = aadc.idouble(vol / n * np.sqrt(sqrt_helper))
+
+    # Bachelier call: (mu-K)*N(x) + sigma*n(x)
+    x = (mu - aadc.idouble(K)) / sigma
+    return (mu - aadc.idouble(K)) * cdf_normal_id(x) + sigma * pdf_normal_id(x)
+
+
+def lookback_call_id(S, r, vol, T, min_S):
+    """Black lookback call Pi in idouble — exact port of C++ BlackLookbackCall::operator()."""
+    T_safe = max(float(T), 0.001)
+    T_c = aadc.idouble(T_safe)
+    sq_t = T_c.sqrt()
+    vol_c = aadc.idouble(vol)
+    r_c = aadc.idouble(r)
+    d_p = aadc.idouble(r + vol*vol/2)
+    d_m = aadc.idouble(r - vol*vol/2)
+
+    c1 = (S / min_S).log()
+    div = vol_c * sq_t
+    a1 = (c1 + d_p * T_c) / div
+    a2 = (c1 + d_m * T_c) / div
+    a3 = (c1 - d_m * T_c) / div
+
+    disc = (r_c * T_c).exp()
+    half_vol2_over_r = aadc.idouble(vol*vol / (2*r))
+
+    price = (disc * S * cdf_normal_id(a1)
+             - min_S * cdf_normal_id(a2)
+             - disc * S * half_vol2_over_r * (
+                 cdf_normal_id(aadc.idouble(-1.0) * a1)
+                 - (aadc.idouble(-1.0) * c1 * aadc.idouble(2*r/(vol*vol)) - r_c * T_c).exp()
+                   * cdf_normal_id(aadc.idouble(-1.0) * a3)
+             ))
+    return price
+
+
+# =================== PI DISPATCHER ===================
+
+def pi_call_id(pi_type, S, current_t, maturity, rate, vol, strike, barrier,
+               fixing_times, fixing_idxs, sim_data_assets, min_S=None):
+    """Call the appropriate Pi function in idouble."""
+    T_remain = maturity - current_t
+    if pi_type == "BlackScholes":
+        return bs_call_id(S, strike, rate, vol, T_remain)
+    elif pi_type == "DownAndOutEuropCallPrice":
+        return down_out_call_id(S, strike, rate, vol, T_remain, barrier)
+    elif pi_type == "BachelierAsian":
+        return bachelier_asian_id(S, strike, rate, vol, T_remain,
+                                   fixing_times, sim_data_assets, fixing_idxs, current_t)
+    elif pi_type == "BlackLookbackCall":
+        if min_S is None:
+            min_S = S
+        return lookback_call_id(S, rate, vol, T_remain, min_S)
+    else:
+        return bs_call_id(S, strike, rate, vol, T_remain)  # fallback
+
+
 # =================== PROCESS SIMULATION ===================
 
 class HestonProcess:
@@ -110,7 +228,8 @@ class HestonProcess:
 # =================== ONE PATH PRICING (exact port of C++) ===================
 
 def one_path_pricing(process, sim_times, z_vars, legendre_idxs, legendre_weights,
-                      strike, maturity, rate, fixing_idxs, payoff_type):
+                      strike, maturity, rate, fixing_idxs, payoff_type,
+                      pi_type="BlackScholes", barrier=0, fixing_times=None):
     """
     Exact port of DriverParallel.h::onePathPricing.
     Returns (payoff, one_path_impact, one_path_quadr) as idouble.
@@ -135,6 +254,14 @@ def one_path_pricing(process, sim_times, z_vars, legendre_idxs, legendre_weights
         S_curr = process.S
         asset_history.append(S_curr)
 
+        # Barrier factor: accumulated *= step(S - barrier)
+        if barrier > 0 and payoff_type == "DownAndOutEuropCallPayoff":
+            x_bar = S_curr - aadc.idouble(barrier)
+            step_v = (x_bar + (x_bar * x_bar + aadc.idouble(0.001 * 0.001)).sqrt()) / aadc.idouble(2 * 0.001)
+            d_sv = step_v - aadc.idouble(1.0)
+            step_clamped = (step_v + aadc.idouble(1.0) - (d_sv * d_sv + aadc.idouble(0.0001)).sqrt()) * half
+            accumulated = accumulated * step_clamped
+
         # FD direction: vol_of_asset * S (process vol)
         vol_dir_process = process.get_vol_of_asset()
         # FD direction: Pi vol * S
@@ -156,8 +283,19 @@ def one_path_pricing(process, sim_times, z_vars, legendre_idxs, legendre_weights
             S_p = (S_p + (S_p * S_p + aadc.idouble(1e-20)).sqrt()) * half
             S_m = (S_m + (S_m * S_m + aadc.idouble(1e-20)).sqrt()) * half
 
-            gamma_ass = gamma_ass + bs_call_id(S_p, strike, rate, pi_vol, T_remain)
-            gamma_ass = gamma_ass + bs_call_id(S_m, strike, rate, pi_vol, T_remain)
+            # Lookback: track min_S for Pi
+            min_S_for_pi = asset_history[0]
+            if payoff_type == "LookbackCall":
+                for ah in asset_history[1:]:
+                    d_ms = min_S_for_pi - ah
+                    min_S_for_pi = (min_S_for_pi + ah - (d_ms*d_ms + aadc.idouble(0.01)).sqrt()) * half
+
+            gamma_ass = gamma_ass + pi_call_id(pi_type, S_p, current_t, maturity, rate, pi_vol,
+                                                strike, barrier, fixing_times or [], fixing_idxs,
+                                                asset_history, min_S_for_pi)
+            gamma_ass = gamma_ass + pi_call_id(pi_type, S_m, current_t, maturity, rate, pi_vol,
+                                                strike, barrier, fixing_times or [], fixing_idxs,
+                                                asset_history, min_S_for_pi)
 
             # FD Hessian with Pi vol direction
             S_p2 = S_curr + eps_c * vol_dir_pi
@@ -165,8 +303,12 @@ def one_path_pricing(process, sim_times, z_vars, legendre_idxs, legendre_weights
             S_p2 = (S_p2 + (S_p2 * S_p2 + aadc.idouble(1e-20)).sqrt()) * half
             S_m2 = (S_m2 + (S_m2 * S_m2 + aadc.idouble(1e-20)).sqrt()) * half
 
-            gamma_base = gamma_base + bs_call_id(S_p2, strike, rate, pi_vol, T_remain)
-            gamma_base = gamma_base + bs_call_id(S_m2, strike, rate, pi_vol, T_remain)
+            gamma_base = gamma_base + pi_call_id(pi_type, S_p2, current_t, maturity, rate, pi_vol,
+                                                  strike, barrier, fixing_times or [], fixing_idxs,
+                                                  asset_history, min_S_for_pi)
+            gamma_base = gamma_base + pi_call_id(pi_type, S_m2, current_t, maturity, rate, pi_vol,
+                                                  strike, barrier, fixing_times or [], fixing_idxs,
+                                                  asset_history, min_S_for_pi)
 
         inc = accumulated * (gamma_ass - gamma_base) / aadc.idouble(eps_fd * eps_fd)
         one_path_impact = one_path_impact + inc * aadc.idouble(dt)
@@ -210,6 +352,7 @@ def run_case(process_params, case, n_steps, n_paths, n_legendre=12):
     rate = process_params.get("rate", 0.05)
     maturity = case["maturity"]
     strike = case.get("strike", 100)
+    barrier = case.get("barrier", 0)
     payoff_type = case["Payoff"]
     fixing_times = case.get("fixing_times", [])
 
@@ -252,9 +395,11 @@ def run_case(process_params, case, n_steps, n_paths, n_legendre=12):
         z_args.append(z2.mark_as_input_no_diff())
         z_vars.append((z1, z2))
 
+    pi_type = case.get("Pi", "BlackScholes")
     payoff, impact, quadr = one_path_pricing(
         proc, sim_times, z_vars, legendre_idxs, legendre_weights,
-        strike, maturity, rate, fixing_idxs, payoff_type
+        strike, maturity, rate, fixing_idxs, payoff_type,
+        pi_type=pi_type, barrier=barrier, fixing_times=fixing_times
     )
 
     payoff_res = payoff.mark_as_output()
