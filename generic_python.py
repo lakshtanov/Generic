@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-generic_python.py — DMC (Denoised Monte Carlo) via AADC Python wheel (v1.8.0).
+generic_python.py — DMC (Denoised Monte Carlo) via AADC Python wheel.
+
+Runs on the latest public `pip install aadc` (verified on aadc 2.22.2); the 1.x method-style
+idouble API (.sqrt/.log/.exp/.erf), mark_as_input_no_diff, ThreadPool and aadc.evaluate are
+all still supported, so no code change was needed vs the original 1.8.0 target.
 
 Exact port of C++ Generic project (DriverParallel.h::onePathPricing).
 FD Hessian at Legendre quadrature points, three outputs (payoff, impact, quadrature),
@@ -678,7 +682,7 @@ def main():
     params["beta"] = proc.get("beta", 1.0)
     process_type = proc["Type"]
 
-    print(f"Generic Python — DMC (full Legendre) via AADC 1.8.0")
+    print(f"Generic Python — DMC (full Legendre) via aadc {aadc.__version__}")
     print(f"Config: {config_file}")
     print(f"Process: {process_type}, S0={params['init_asset']}, v0={params['init_vol']}")
     print(f"Steps: {n_steps}, Paths: {n_paths}, Legendre: {n_legendre}")
