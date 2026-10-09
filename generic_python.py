@@ -12,6 +12,23 @@ two reverses (payoff delta + quadrature delta).
 
 Requires: pip install aadc numpy scipy (Python 3.9+)
 Usage: python generic_python.py Examples/Heston.json
+
+Numerical notes / known issues:
+  * SABR + barrier/lookback: the FD-Hessian bump (eps*vol_dir) can drive the bumped S to ~0
+    (SABR beta=0.5 lets S diffuse to 0, and vol grows), where the control-variate Pi hits a
+    1/S singularity (down-and-out B^2/S -> inf with reflection_factor -> 0 => 0*inf = NaN;
+    lookback log(S/min_S) -> -inf => exp(+inf) => 0*inf). Fixed by flooring S in those Pi
+    terms (see S_safe in down_out_call_id / lookback_call_id). Verified: SabrScalar.json goes
+    from 15 NaN lines to 0; Heston/SABR/SABR2 results unchanged (floors are inert for S>~1e-3).
+  * STILL BROKEN (pre-existing, not from this change): Heston DownAndOut far-ITM long-dated
+    cases (K=128 & K=149, T=5) overflow in the FD-Hessian — DMC ~1e61 in the original 1.8.0
+    run, ~1e20 after the S_safe floor. The reflected BS at the floored S is still large and the
+    second-difference /eps^2 blows up. TO FIX: either (a) use a larger/relative S floor in the
+    reflection so B^2/S_safe stays O(S0) for deep-ITM barriers, (b) clamp/skip the Pi second
+    derivative when |reflected_S/S0| exceeds a threshold, or (c) regularise the FD-Hessian
+    (adaptive eps that keeps S+-eps*vol_dir within [S/2, 3S/2]) applied to BOTH vol directions
+    with the SAME eps AND floored away from 0 (note: eps -> 0 as S -> 0 causes 0/0 in inc/eps^2,
+    so any adaptive eps must be floored, e.g. eps_eff = clip(eps, 1e-4, ...)).
 """
 
 import sys
@@ -91,10 +108,15 @@ def down_out_call_id(S, K, r, vol, T, barrier):
     kappa = 2 * r / (vol * vol)
     bs_direct = bs_call_id(S, K, r, vol, T)
     B = aadc.idouble(barrier)
+    # Floor S away from 0 for the reflected term: the FD-Hessian bump can drive the bumped
+    # S to ~0 (SABR, large vol / tiny path-S), where B^2/S -> inf while reflection_factor -> 0,
+    # giving 0*inf = NaN. S_safe keeps the reflection finite (its S->0 limit is the finite B);
+    # for any normal S (>~1e-3) S_safe == S, so valid results are unchanged.
+    S_safe = (S * S + aadc.idouble(1e-8)).sqrt()
     # (S/B)^(1-κ): use exp((1-κ)*log(S/B))
-    log_SB = (S / B).log()
+    log_SB = (S_safe / B).log()
     reflection_factor = (aadc.idouble(1 - kappa) * log_SB).exp()
-    reflected_S = B * B / S
+    reflected_S = B * B / S_safe
     bs_reflected = bs_call_id(reflected_S, K, r, vol, T)
     return bs_direct - reflection_factor * bs_reflected
 
@@ -151,7 +173,11 @@ def lookback_call_id(S, r, vol, T, min_S):
     d_p_val = r_safe + vol*vol/2
     d_m_val = r_safe - vol*vol/2
 
-    c1 = (S / min_S).log()
+    # floor S and min_S away from 0: a bumped S ~ 0 makes log(S/min_S) -> -inf and
+    # exp(-c1*2r/vol^2) -> inf, giving 0*inf = NaN. Floors are inert for normal values.
+    S_safe = (S * S + aadc.idouble(1e-8)).sqrt()
+    min_safe = (min_S * min_S + aadc.idouble(1e-8)).sqrt()
+    c1 = (S_safe / min_safe).log()
     div = aadc.idouble(vol) * sq_t
     a1 = (c1 + aadc.idouble(d_p_val * T_safe)) / div
     a2 = (c1 + aadc.idouble(d_m_val * T_safe)) / div
@@ -682,7 +708,7 @@ def main():
     params["beta"] = proc.get("beta", 1.0)
     process_type = proc["Type"]
 
-    print(f"Generic Python — DMC (full Legendre) via aadc {aadc.__version__}")
+    print(f"Generic Python — DMC (full Legendre) via aadc {getattr(aadc, '__version__', 'unknown')}")
     print(f"Config: {config_file}")
     print(f"Process: {process_type}, S0={params['init_asset']}, v0={params['init_vol']}")
     print(f"Steps: {n_steps}, Paths: {n_paths}, Legendre: {n_legendre}")
